@@ -1,115 +1,88 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  getDifficultyStyles,
+  formatSecondsToClock,
+  formatSpentTime,
+  getPerformanceLabel,
+  getEstimatedLevel,
+  getRecommendations,
+} from "./utils/index";
+import type { ExamQuestion, ExamStage, SubjectStats } from "./types";
+import { getQuestionstAll } from "./api/QuestionsApi";
 
-type ExamOption = {
-  id: string;
-  text: string;
-};
+const EXAM_DURATION_MINUTES = 180;
 
-type ExamQuestion = {
-  id: number;
-  subject: string;
-  difficulty: "Fácil" | "Media" | "Difícil";
-  question: string;
-  options: ExamOption[];
-};
+export default function App() {
+  const [EXAM_QUESTIONS, setEXAM_QUESTIONS] = useState<ExamQuestion[]>([]);
+  const [questionsLoading, setQuestionsLoading] = useState(true);
+  const [questionsError, setQuestionsError] = useState<string | null>(null);
 
-const MOCK_QUESTIONS: ExamQuestion[] = [
-  {
-    id: 1,
-    subject: "Matemáticas",
-    difficulty: "Media",
-    question:
-      "Si una función lineal tiene pendiente 3 y corta al eje Y en 2, ¿cuál es su expresión algebraica?",
-    options: [
-      { id: "A", text: "y = 3x + 2" },
-      { id: "B", text: "y = 2x + 3" },
-      { id: "C", text: "y = 3x - 2" },
-      { id: "D", text: "y = x + 5" },
-    ],
-  },
-  {
-    id: 2,
-    subject: "Comprensión lectora",
-    difficulty: "Media",
-    question:
-      "¿Cuál es la intención principal de un texto argumentativo?",
-    options: [
-      { id: "A", text: "Narrar una historia ficticia" },
-      { id: "B", text: "Convencer al lector de una postura" },
-      { id: "C", text: "Describir un paisaje" },
-      { id: "D", text: "Explicar un procedimiento técnico" },
-    ],
-  },
-  {
-    id: 3,
-    subject: "Química",
-    difficulty: "Difícil",
-    question:
-      "¿Cuál de los siguientes elementos pertenece al grupo de los halógenos?",
-    options: [
-      { id: "A", text: "Sodio" },
-      { id: "B", text: "Cloro" },
-      { id: "C", text: "Calcio" },
-      { id: "D", text: "Hierro" },
-    ],
-  },
-  {
-    id: 4,
-    subject: "Física",
-    difficulty: "Fácil",
-    question:
-      "¿Cuál es la unidad de medida de la fuerza en el Sistema Internacional?",
-    options: [
-      { id: "A", text: "Joule" },
-      { id: "B", text: "Pascal" },
-      { id: "C", text: "Newton" },
-      { id: "D", text: "Watt" },
-    ],
-  },
-  {
-    id: 5,
-    subject: "Historia",
-    difficulty: "Media",
-    question:
-      "¿En qué año inició la Revolución Mexicana?",
-    options: [
-      { id: "A", text: "1810" },
-      { id: "B", text: "1910" },
-      { id: "C", text: "1921" },
-      { id: "D", text: "1938" },
-    ],
-  },
-];
-
-const TOTAL_TIME_IN_MINUTES = 180;
-
-const formatTime = (minutes: number, seconds = 0) => {
-  const mm = String(minutes).padStart(2, "0");
-  const ss = String(seconds).padStart(2, "0");
-  return `${mm}:${ss}:00`;
-};
-
-const getDifficultyStyles = (difficulty: ExamQuestion["difficulty"]) => {
-  switch (difficulty) {
-    case "Fácil":
-      return "bg-emerald-100 text-emerald-700 border border-emerald-200";
-    case "Media":
-      return "bg-amber-100 text-amber-700 border border-amber-200";
-    case "Difícil":
-      return "bg-rose-100 text-rose-700 border border-rose-200";
-    default:
-      return "bg-slate-100 text-slate-700 border border-slate-200";
-  }
-};
-
-export default function ExamSimulatorLayout() {
+  const [stage, setStage] = useState<ExamStage>("exam");
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [selectedAnswers, setSelectedAnswers] = useState<Record<number, string>>(
     {}
   );
+  const [markedForReview, setMarkedForReview] = useState<number[]>([]);
+  const [remainingSeconds, setRemainingSeconds] = useState(
+    EXAM_DURATION_MINUTES * 60
+  );
+  const [submittedAtSeconds, setSubmittedAtSeconds] = useState<number | null>(
+    null
+  );
 
-  const totalQuestions = MOCK_QUESTIONS.length;
-  const currentQuestion = MOCK_QUESTIONS[currentQuestionIndex];
+  useEffect(() => {
+    const loadQuestions = async () => {
+      try {
+        setQuestionsLoading(true);
+        setQuestionsError(null);
+
+        const questions = await getQuestionstAll();
+        setEXAM_QUESTIONS(questions);
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Error al cargar las preguntas";
+        setQuestionsError(message);
+      } finally {
+        setQuestionsLoading(false);
+      }
+    };
+
+    loadQuestions();
+  }, []);
+
+  const totalQuestions = EXAM_QUESTIONS.length;
+  const currentQuestion = EXAM_QUESTIONS[currentQuestionIndex] ?? null;
+  const isLastQuestion =
+    totalQuestions > 0 && currentQuestionIndex === totalQuestions - 1;
+
+  useEffect(() => {
+    if (stage !== "exam") return;
+    if (remainingSeconds <= 0) return;
+    if (questionsLoading) return;
+    if (totalQuestions === 0) return;
+
+    const interval = window.setInterval(() => {
+      setRemainingSeconds((prev) => {
+        if (prev <= 1) {
+          window.clearInterval(interval);
+          return 0;
+        }
+
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => window.clearInterval(interval);
+  }, [stage, remainingSeconds, questionsLoading, totalQuestions]);
+
+  useEffect(() => {
+    if (stage === "exam" && remainingSeconds === 0 && totalQuestions > 0) {
+      handleFinishExam();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remainingSeconds, stage, totalQuestions]);
 
   const answeredCount = useMemo(
     () => Object.keys(selectedAnswers).length,
@@ -117,11 +90,94 @@ export default function ExamSimulatorLayout() {
   );
 
   const unansweredCount = totalQuestions - answeredCount;
+  const progressPercentage = totalQuestions
+    ? (answeredCount / totalQuestions) * 100
+    : 0;
 
-  const progressPercentage = useMemo(() => {
-    if (totalQuestions === 0) return 0;
-    return (answeredCount / totalQuestions) * 100;
-  }, [answeredCount, totalQuestions]);
+  const isExamCompleted = totalQuestions > 0 && answeredCount === totalQuestions;
+
+  const correctCount = useMemo(() => {
+    return EXAM_QUESTIONS.reduce((acc, question) => {
+      return selectedAnswers[question.id] === question.correctAnswer
+        ? acc + 1
+        : acc;
+    }, 0);
+  }, [selectedAnswers, EXAM_QUESTIONS]);
+
+  const incorrectCount = useMemo(() => {
+    return EXAM_QUESTIONS.reduce((acc, question) => {
+      const answer = selectedAnswers[question.id];
+
+      if (!answer) return acc;
+      if (answer !== question.correctAnswer) return acc + 1;
+
+      return acc;
+    }, 0);
+  }, [selectedAnswers, EXAM_QUESTIONS]);
+
+  const scorePercentage = totalQuestions
+    ? Math.round((correctCount / totalQuestions) * 100)
+    : 0;
+
+  const performance = getPerformanceLabel(scorePercentage);
+  const estimatedLevel = getEstimatedLevel(scorePercentage);
+  const usedSeconds =
+    submittedAtSeconds !== null
+      ? EXAM_DURATION_MINUTES * 60 - submittedAtSeconds
+      : EXAM_DURATION_MINUTES * 60 - remainingSeconds;
+
+  const subjectStats = useMemo<SubjectStats[]>(() => {
+    const grouped = EXAM_QUESTIONS.reduce<Record<string, SubjectStats>>(
+      (acc, question) => {
+        if (!acc[question.subject]) {
+          acc[question.subject] = {
+            subject: question.subject,
+            total: 0,
+            correct: 0,
+            incorrect: 0,
+            answered: 0,
+            percentage: 0,
+          };
+        }
+
+        acc[question.subject].total += 1;
+
+        const userAnswer = selectedAnswers[question.id];
+        if (userAnswer) {
+          acc[question.subject].answered += 1;
+        }
+
+        if (userAnswer === question.correctAnswer) {
+          acc[question.subject].correct += 1;
+        } else if (userAnswer && userAnswer !== question.correctAnswer) {
+          acc[question.subject].incorrect += 1;
+        }
+
+        return acc;
+      },
+      {}
+    );
+
+    return Object.values(grouped).map((item) => ({
+      ...item,
+      percentage: item.total ? Math.round((item.correct / item.total) * 100) : 0,
+    }));
+  }, [selectedAnswers, EXAM_QUESTIONS]);
+
+  const incorrectQuestions = useMemo(() => {
+    return EXAM_QUESTIONS.filter((question) => {
+      const answer = selectedAnswers[question.id];
+      return Boolean(answer) && answer !== question.correctAnswer;
+    });
+  }, [selectedAnswers, EXAM_QUESTIONS]);
+
+  const unansweredQuestions = useMemo(() => {
+    return EXAM_QUESTIONS.filter((question) => !selectedAnswers[question.id]);
+  }, [selectedAnswers, EXAM_QUESTIONS]);
+
+  const recommendations = useMemo(() => {
+    return getRecommendations(scorePercentage, subjectStats, unansweredCount);
+  }, [scorePercentage, subjectStats, unansweredCount]);
 
   const handleSelectAnswer = (questionId: number, optionId: string) => {
     setSelectedAnswers((prev) => ({
@@ -146,67 +202,566 @@ export default function ExamSimulatorLayout() {
     }
   };
 
-  const questionStatusLabel = (questionId: number) =>
-    selectedAnswers[questionId] ? "Respondida" : "Pendiente";
+  const toggleMarkForReview = (questionId: number) => {
+    setMarkedForReview((prev) => {
+      const exists = prev.includes(questionId);
+      if (exists) {
+        return prev.filter((id) => id !== questionId);
+      }
+
+      return [...prev, questionId];
+    });
+  };
+
+  const handleFinishExam = () => {
+    setSubmittedAtSeconds(remainingSeconds);
+    setStage("results");
+  };
+
+  const handleRestartExam = () => {
+    setStage("exam");
+    setCurrentQuestionIndex(0);
+    setSelectedAnswers({});
+    setMarkedForReview([]);
+    setRemainingSeconds(EXAM_DURATION_MINUTES * 60);
+    setSubmittedAtSeconds(null);
+  };
+
+  if (questionsLoading) {
+    return (
+      <div className="min-h-screen bg-slate-100 text-slate-900">
+        <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+          <div className="rounded-[32px] bg-white p-10 text-center shadow-sm ring-1 ring-slate-200">
+            <p className="text-lg font-semibold text-slate-800">
+              Cargando preguntas...
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (questionsError) {
+    return (
+      <div className="min-h-screen bg-slate-100 text-slate-900">
+        <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+          <div className="rounded-[32px] bg-white p-10 text-center shadow-sm ring-1 ring-slate-200">
+            <p className="text-lg font-semibold text-rose-700">
+              {questionsError}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!currentQuestion) {
+    return (
+      <div className="min-h-screen bg-slate-100 text-slate-900">
+        <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+          <div className="rounded-[32px] bg-white p-10 text-center shadow-sm ring-1 ring-slate-200">
+            <p className="text-lg font-semibold text-slate-800">
+              No hay preguntas disponibles.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (stage === "results") {
+    return (
+      <div className="min-h-screen bg-slate-100 text-slate-900">
+        <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+          <header className="mb-6 overflow-hidden rounded-[32px] bg-gradient-to-r from-slate-950 via-indigo-950 to-blue-950 text-white shadow-2xl">
+            <div className="flex flex-col gap-6 px-6 py-8 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <p className="mb-3 inline-flex rounded-full bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-slate-200">
+                  Resultado oficial del simulador
+                </p>
+                <h1 className="text-3xl font-black tracking-tight sm:text-4xl">
+                  Reporte de desempeño UNAM / IPN 2026
+                </h1>
+                <p className="mt-3 max-w-3xl text-sm text-slate-300 sm:text-base">
+                  Análisis integral del examen: precisión, tiempo, desempeño por
+                  materia, reactivos incorrectos y recomendaciones de mejora.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className="rounded-2xl bg-white/10 p-4 backdrop-blur">
+                  <p className="text-xs uppercase tracking-wide text-slate-300">
+                    Puntaje
+                  </p>
+                  <p className="mt-1 text-3xl font-black">{scorePercentage}%</p>
+                </div>
+                <div className="rounded-2xl bg-white/10 p-4 backdrop-blur">
+                  <p className="text-xs uppercase tracking-wide text-slate-300">
+                    Aciertos
+                  </p>
+                  <p className="mt-1 text-3xl font-black">{correctCount}</p>
+                </div>
+                <div className="rounded-2xl bg-white/10 p-4 backdrop-blur">
+                  <p className="text-xs uppercase tracking-wide text-slate-300">
+                    Errores
+                  </p>
+                  <p className="mt-1 text-3xl font-black">{incorrectCount}</p>
+                </div>
+                <div className="rounded-2xl bg-white/10 p-4 backdrop-blur">
+                  <p className="text-xs uppercase tracking-wide text-slate-300">
+                    Tiempo usado
+                  </p>
+                  <p className="mt-1 text-lg font-black">
+                    {formatSpentTime(usedSeconds)}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </header>
+
+          <div className="grid gap-6 xl:grid-cols-[1.45fr_0.85fr]">
+            <main className="space-y-6">
+              <section className="rounded-[30px] bg-white p-6 shadow-sm ring-1 ring-slate-200 sm:p-7">
+                <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+                      Resultado general
+                    </p>
+                    <div className="mt-3 flex flex-wrap items-center gap-3">
+                      <h2 className="text-4xl font-black tracking-tight text-slate-950 sm:text-5xl">
+                        {scorePercentage}%
+                      </h2>
+                      <span
+                        className={`rounded-full px-4 py-2 text-sm font-semibold ${performance.style}`}
+                      >
+                        {performance.label}
+                      </span>
+                    </div>
+                    <p className="mt-4 max-w-3xl text-slate-600">
+                      Tu nivel estimado en este simulador es{" "}
+                      <span className="font-bold text-slate-900">
+                        {estimatedLevel}
+                      </span>
+                      . Este resultado te ayuda a identificar fortalezas,
+                      debilidades y áreas prioritarias de reforzamiento antes del
+                      examen real.
+                    </p>
+                  </div>
+
+                  <div className="flex h-40 w-40 items-center justify-center rounded-full bg-gradient-to-br from-blue-600 to-indigo-700 text-white shadow-xl">
+                    <div className="text-center">
+                      <p className="text-xs uppercase tracking-wide text-blue-100">
+                        Score
+                      </p>
+                      <p className="text-4xl font-black">{scorePercentage}</p>
+                      <p className="text-sm font-medium text-blue-100">/100</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                  <div className="rounded-2xl bg-slate-50 p-5 ring-1 ring-slate-200">
+                    <p className="text-xs uppercase tracking-wide text-slate-500">
+                      Total de reactivos
+                    </p>
+                    <p className="mt-2 text-3xl font-black text-slate-900">
+                      {totalQuestions}
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl bg-emerald-50 p-5 ring-1 ring-emerald-100">
+                    <p className="text-xs uppercase tracking-wide text-emerald-600">
+                      Reactivos correctos
+                    </p>
+                    <p className="mt-2 text-3xl font-black text-emerald-700">
+                      {correctCount}
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl bg-rose-50 p-5 ring-1 ring-rose-100">
+                    <p className="text-xs uppercase tracking-wide text-rose-600">
+                      Reactivos incorrectos
+                    </p>
+                    <p className="mt-2 text-3xl font-black text-rose-700">
+                      {incorrectCount}
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl bg-amber-50 p-5 ring-1 ring-amber-100">
+                    <p className="text-xs uppercase tracking-wide text-amber-600">
+                      Sin responder
+                    </p>
+                    <p className="mt-2 text-3xl font-black text-amber-700">
+                      {unansweredCount}
+                    </p>
+                  </div>
+                </div>
+              </section>
+
+              <section className="rounded-[30px] bg-white p-6 shadow-sm ring-1 ring-slate-200 sm:p-7">
+                <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h3 className="text-2xl font-black text-slate-950">
+                      Desempeño por materia
+                    </h3>
+                    <p className="mt-1 text-slate-500">
+                      Visualiza con precisión qué materias requieren más trabajo.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  {subjectStats.map((item) => (
+                    <div
+                      key={item.subject}
+                      className="rounded-2xl border border-slate-200 bg-slate-50 p-5"
+                    >
+                      <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <h4 className="text-lg font-bold text-slate-900">
+                            {item.subject}
+                          </h4>
+                          <p className="text-sm text-slate-500">
+                            {item.correct} correctas · {item.incorrect} incorrectas ·{" "}
+                            {item.total} total
+                          </p>
+                        </div>
+
+                        <div className="rounded-2xl bg-white px-4 py-3 ring-1 ring-slate-200">
+                          <p className="text-xs uppercase tracking-wide text-slate-500">
+                            Rendimiento
+                          </p>
+                          <p className="text-2xl font-black text-slate-900">
+                            {item.percentage}%
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="h-3 w-full overflow-hidden rounded-full bg-slate-200">
+                        <div
+                          className="h-full rounded-full bg-gradient-to-r from-blue-600 to-indigo-600"
+                          style={{ width: `${item.percentage}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <section className="rounded-[30px] bg-white p-6 shadow-sm ring-1 ring-slate-200 sm:p-7">
+                <div className="mb-6">
+                  <h3 className="text-2xl font-black text-slate-950">
+                    Recomendaciones estratégicas
+                  </h3>
+                  <p className="mt-1 text-slate-500">
+                    Sugerencias basadas en tu desempeño actual para mejorar tu
+                    preparación.
+                  </p>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  {recommendations.map((recommendation, index) => (
+                    <div
+                      key={`${recommendation}-${index}`}
+                      className="rounded-2xl bg-gradient-to-br from-slate-900 to-indigo-900 p-5 text-white shadow-lg"
+                    >
+                      <p className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-slate-300">
+                        Recomendación {index + 1}
+                      </p>
+                      <p className="text-sm leading-7 text-slate-100">
+                        {recommendation}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <section className="rounded-[30px] bg-white p-6 shadow-sm ring-1 ring-slate-200 sm:p-7">
+                <div className="mb-6">
+                  <h3 className="text-2xl font-black text-slate-950">
+                    Reactivos incorrectos
+                  </h3>
+                  <p className="mt-1 text-slate-500">
+                    Revisión detallada de tus errores para estudio posterior.
+                  </p>
+                </div>
+
+                {incorrectQuestions.length === 0 ? (
+                  <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-6 text-emerald-700">
+                    Excelente trabajo. No tienes reactivos incorrectos en este
+                    simulador.
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {incorrectQuestions.map((question) => {
+                      const selectedOption = question.options.find(
+                        (option) => option.id === selectedAnswers[question.id]
+                      );
+                      const correctOption = question.options.find(
+                        (option) => option.id === question.correctAnswer
+                      );
+
+                      return (
+                        <div
+                          key={question.id}
+                          className="rounded-2xl border border-slate-200 bg-slate-50 p-5"
+                        >
+                          <div className="mb-4 flex flex-wrap items-center gap-3">
+                            <span className="rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white">
+                              Reactivo {question.id}
+                            </span>
+                            <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-700">
+                              {question.subject}
+                            </span>
+                            <span
+                              className={`rounded-full px-3 py-1 text-xs font-semibold ${getDifficultyStyles(
+                                question.difficulty
+                              )}`}
+                            >
+                              {question.difficulty}
+                            </span>
+                          </div>
+
+                          <h4 className="text-lg font-bold leading-relaxed text-slate-900">
+                            {question.question}
+                          </h4>
+
+                          <div className="mt-5 grid gap-3">
+                            <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4">
+                              <p className="text-xs font-semibold uppercase tracking-wide text-rose-600">
+                                Tu respuesta
+                              </p>
+                              <p className="mt-2 font-semibold text-rose-700">
+                                {selectedOption
+                                  ? `${selectedOption.id}. ${selectedOption.text}`
+                                  : "Sin respuesta"}
+                              </p>
+                            </div>
+
+                            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                              <p className="text-xs font-semibold uppercase tracking-wide text-emerald-600">
+                                Respuesta correcta
+                              </p>
+                              <p className="mt-2 font-semibold text-emerald-700">
+                                {correctOption
+                                  ? `${correctOption.id}. ${correctOption.text}`
+                                  : "No disponible"}
+                              </p>
+                            </div>
+
+                            <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                Explicación
+                              </p>
+                              <p className="mt-2 leading-7 text-slate-700">
+                                {question.explanation}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+
+              {unansweredQuestions.length > 0 && (
+                <section className="rounded-[30px] bg-white p-6 shadow-sm ring-1 ring-slate-200 sm:p-7">
+                  <div className="mb-5">
+                    <h3 className="text-2xl font-black text-slate-950">
+                      Reactivos sin responder
+                    </h3>
+                    <p className="mt-1 text-slate-500">
+                      Estas preguntas quedaron pendientes al momento de enviar el
+                      simulador.
+                    </p>
+                  </div>
+
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {unansweredQuestions.map((question) => (
+                      <div
+                        key={question.id}
+                        className="rounded-2xl border border-amber-200 bg-amber-50 p-4"
+                      >
+                        <div className="mb-2 flex flex-wrap items-center gap-2">
+                          <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700">
+                            Reactivo {question.id}
+                          </span>
+                          <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-700 ring-1 ring-amber-200">
+                            {question.subject}
+                          </span>
+                        </div>
+                        <p className="text-sm leading-6 text-slate-700">
+                          {question.question}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+            </main>
+
+            <aside className="space-y-6">
+              <section className="rounded-[30px] bg-white p-6 shadow-sm ring-1 ring-slate-200">
+                <h3 className="text-xl font-black text-slate-950">
+                  Resumen ejecutivo
+                </h3>
+                <p className="mt-1 text-sm text-slate-500">
+                  Indicadores clave del simulador.
+                </p>
+
+                <div className="mt-5 grid gap-3">
+                  <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
+                    <p className="text-xs uppercase tracking-wide text-slate-500">
+                      Nivel estimado
+                    </p>
+                    <p className="mt-2 text-lg font-black text-slate-900">
+                      {estimatedLevel}
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl bg-blue-50 p-4 ring-1 ring-blue-100">
+                    <p className="text-xs uppercase tracking-wide text-blue-600">
+                      Tiempo empleado
+                    </p>
+                    <p className="mt-2 text-lg font-black text-blue-800">
+                      {formatSpentTime(usedSeconds)}
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl bg-emerald-50 p-4 ring-1 ring-emerald-100">
+                    <p className="text-xs uppercase tracking-wide text-emerald-600">
+                      Eficiencia
+                    </p>
+                    <p className="mt-2 text-lg font-black text-emerald-700">
+                      {correctCount}/{totalQuestions} correctas
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl bg-amber-50 p-4 ring-1 ring-amber-100">
+                    <p className="text-xs uppercase tracking-wide text-amber-600">
+                      Marcadas para revisar
+                    </p>
+                    <p className="mt-2 text-lg font-black text-amber-700">
+                      {markedForReview.length}
+                    </p>
+                  </div>
+                </div>
+              </section>
+
+              <section className="rounded-[30px] bg-white p-6 shadow-sm ring-1 ring-slate-200">
+                <h3 className="text-xl font-black text-slate-950">
+                  Ranking estimado
+                </h3>
+                <p className="mt-1 text-sm text-slate-500">
+                  Proyección aproximada basada en tu score actual.
+                </p>
+
+                <div className="mt-5 rounded-3xl bg-gradient-to-br from-slate-950 via-indigo-950 to-blue-900 p-6 text-white shadow-xl">
+                  <p className="text-xs uppercase tracking-[0.2em] text-slate-300">
+                    Proyección
+                  </p>
+                  <p className="mt-3 text-3xl font-black">{estimatedLevel}</p>
+                  <div className="mt-5 h-3 w-full overflow-hidden rounded-full bg-white/10">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-blue-500"
+                      style={{ width: `${scorePercentage}%` }}
+                    />
+                  </div>
+                  <p className="mt-3 text-sm text-slate-300">
+                    Tu rendimiento actual indica una preparación de nivel{" "}
+                    <span className="font-bold text-white">
+                      {estimatedLevel}
+                    </span>
+                    .
+                  </p>
+                </div>
+              </section>
+
+              <section className="rounded-[30px] bg-gradient-to-br from-slate-900 to-indigo-900 p-6 text-white shadow-2xl">
+                <h3 className="text-xl font-black">Siguiente paso</h3>
+                <p className="mt-2 text-sm leading-7 text-slate-300">
+                  Puedes reiniciar este simulador para volver a practicar o usar
+                  este reporte como referencia para construir un plan de estudio
+                  más preciso.
+                </p>
+
+                <button
+                  type="button"
+                  onClick={handleRestartExam}
+                  className="mt-6 w-full rounded-2xl bg-white px-5 py-3 font-bold text-slate-900 transition hover:bg-slate-100"
+                >
+                  Reiniciar simulador
+                </button>
+              </section>
+            </aside>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900">
       <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-        {/* Header */}
-        <header className="mb-6 overflow-hidden rounded-3xl bg-gradient-to-r from-blue-700 via-indigo-700 to-slate-900 text-white shadow-xl">
-          <div className="flex flex-col gap-6 px-6 py-7 md:flex-row md:items-center md:justify-between">
+        <header className="mb-6 overflow-hidden rounded-[32px] bg-gradient-to-r from-blue-700 via-indigo-700 to-slate-900 text-white shadow-2xl">
+          <div className="flex flex-col gap-6 px-6 py-8 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <p className="mb-2 inline-flex rounded-full bg-white/15 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-blue-100">
+              <p className="mb-3 inline-flex rounded-full bg-white/15 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-blue-100">
                 Simulador online 2026
               </p>
-              <h1 className="text-2xl font-black tracking-tight sm:text-4xl">
+              <h1 className="text-3xl font-black tracking-tight sm:text-4xl">
                 Simulador de Examen UNAM / IPN
               </h1>
-              <p className="mt-2 max-w-2xl text-sm text-slate-200 sm:text-base">
-                Practica en un entorno tipo examen real con temporizador,
-                navegación por reactivos y seguimiento de avance.
+              <p className="mt-3 max-w-3xl text-sm text-slate-200 sm:text-base">
+                Entrena en un entorno visual tipo plataforma premium con control
+                de progreso, reactivos, revisión y resultado integral.
               </p>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               <div className="rounded-2xl bg-white/10 p-4 backdrop-blur-sm">
-                <p className="text-xs uppercase tracking-wide text-slate-200">
+                <p className="text-xs uppercase tracking-wide text-slate-300">
                   Preguntas
                 </p>
-                <p className="mt-1 text-2xl font-bold">{totalQuestions}</p>
+                <p className="mt-1 text-2xl font-black">{totalQuestions}</p>
               </div>
 
               <div className="rounded-2xl bg-white/10 p-4 backdrop-blur-sm">
-                <p className="text-xs uppercase tracking-wide text-slate-200">
+                <p className="text-xs uppercase tracking-wide text-slate-300">
                   Tiempo total
                 </p>
-                <p className="mt-1 text-2xl font-bold">
-                  {formatTime(TOTAL_TIME_IN_MINUTES)}
+                <p className="mt-1 text-2xl font-black">
+                  {formatSecondsToClock(EXAM_DURATION_MINUTES * 60)}
                 </p>
               </div>
 
-              <div className="rounded-2xl bg-white/10 p-4 backdrop-blur-sm col-span-2 sm:col-span-1">
-                <p className="text-xs uppercase tracking-wide text-slate-200">
-                  Modo
+              <div className="rounded-2xl bg-white/10 p-4 backdrop-blur-sm">
+                <p className="text-xs uppercase tracking-wide text-slate-300">
+                  Respondidas
                 </p>
-                <p className="mt-1 text-2xl font-bold">Práctica</p>
+                <p className="mt-1 text-2xl font-black">{answeredCount}</p>
+              </div>
+
+              <div className="rounded-2xl bg-white/10 p-4 backdrop-blur-sm">
+                <p className="text-xs uppercase tracking-wide text-slate-300">
+                  Pendientes
+                </p>
+                <p className="mt-1 text-2xl font-black">{unansweredCount}</p>
               </div>
             </div>
           </div>
         </header>
 
-        {/* Main content */}
         <div className="grid gap-6 xl:grid-cols-[1.6fr_0.8fr]">
-          {/* Left column */}
           <main className="space-y-6">
-            {/* Top stats */}
-            <section className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+            <section className="rounded-[30px] bg-white p-5 shadow-sm ring-1 ring-slate-200 sm:p-7">
               <div className="mb-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                 <div>
                   <p className="text-sm font-medium text-slate-500">
                     Avance del examen
                   </p>
-                  <h2 className="text-xl font-bold text-slate-900">
+                  <h2 className="text-2xl font-black text-slate-900">
                     Pregunta {currentQuestionIndex + 1} de {totalQuestions}
                   </h2>
                 </div>
@@ -229,16 +784,24 @@ export default function ExamSimulatorLayout() {
               </div>
 
               <p className="mt-3 text-sm text-slate-500">
-                Has completado el{" "}
-                <span className="font-bold text-slate-800">
-                  {Math.round(progressPercentage)}%
-                </span>{" "}
-                del simulador.
+                {isExamCompleted ? (
+                  <span className="font-semibold text-emerald-600">
+                    Has completado el examen. Puedes enviarlo o revisar tus
+                    respuestas.
+                  </span>
+                ) : (
+                  <>
+                    Has completado el{" "}
+                    <span className="font-bold text-slate-800">
+                      {Math.round(progressPercentage)}%
+                    </span>{" "}
+                    del simulador.
+                  </>
+                )}
               </p>
             </section>
 
-            {/* Question card */}
-            <section className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-slate-200 sm:p-7">
+            <section className="rounded-[30px] bg-white p-5 shadow-sm ring-1 ring-slate-200 sm:p-7">
               <div className="mb-6 flex flex-col gap-4 border-b border-slate-200 pb-6 md:flex-row md:items-center md:justify-between">
                 <div className="flex flex-wrap items-center gap-3">
                   <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
@@ -252,16 +815,23 @@ export default function ExamSimulatorLayout() {
                     {currentQuestion.difficulty}
                   </span>
                   <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
-                    {questionStatusLabel(currentQuestion.id)}
+                    {selectedAnswers[currentQuestion.id]
+                      ? "Respondida"
+                      : "Pendiente"}
                   </span>
+                  {markedForReview.includes(currentQuestion.id) && (
+                    <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700">
+                      Marcada para revisar
+                    </span>
+                  )}
                 </div>
 
-                <div className="rounded-2xl bg-slate-900 px-4 py-3 text-white shadow-md">
+                <div className="rounded-2xl bg-slate-950 px-5 py-4 text-white shadow-lg">
                   <p className="text-xs uppercase tracking-wide text-slate-300">
                     Tiempo restante
                   </p>
-                  <p className="text-lg font-bold">
-                    {formatTime(TOTAL_TIME_IN_MINUTES)}
+                  <p className="text-2xl font-black">
+                    {formatSecondsToClock(remainingSeconds)}
                   </p>
                 </div>
               </div>
@@ -271,7 +841,7 @@ export default function ExamSimulatorLayout() {
                   Reactivo {currentQuestion.id}
                 </p>
 
-                <h3 className="text-xl font-bold leading-relaxed text-slate-900 sm:text-2xl">
+                <h3 className="text-2xl font-black leading-relaxed text-slate-950">
                   {currentQuestion.question}
                 </h3>
               </div>
@@ -306,7 +876,7 @@ export default function ExamSimulatorLayout() {
 
                       <div className="flex-1 pt-1">
                         <p
-                          className={`text-base font-medium ${
+                          className={`text-base font-semibold ${
                             isSelected ? "text-blue-900" : "text-slate-800"
                           }`}
                         >
@@ -318,7 +888,6 @@ export default function ExamSimulatorLayout() {
                 })}
               </div>
 
-              {/* Navigation */}
               <div className="mt-8 flex flex-col gap-4 border-t border-slate-200 pt-6 sm:flex-row sm:items-center sm:justify-between">
                 <button
                   type="button"
@@ -329,32 +898,46 @@ export default function ExamSimulatorLayout() {
                   ← Pregunta anterior
                 </button>
 
-                <div className="flex gap-3">
+                <div className="flex flex-wrap gap-3">
                   <button
                     type="button"
-                    className="inline-flex items-center justify-center rounded-2xl border border-amber-300 bg-amber-50 px-5 py-3 font-semibold text-amber-700 transition hover:bg-amber-100"
+                    onClick={() => toggleMarkForReview(currentQuestion.id)}
+                    className={`inline-flex items-center justify-center rounded-2xl px-5 py-3 font-semibold transition ${
+                      markedForReview.includes(currentQuestion.id)
+                        ? "border border-amber-300 bg-amber-100 text-amber-700"
+                        : "border border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100"
+                    }`}
                   >
-                    Marcar para revisar
+                    {markedForReview.includes(currentQuestion.id)
+                      ? "Quitar marca"
+                      : "Marcar para revisar"}
                   </button>
 
-                  <button
-                    type="button"
-                    onClick={handleNextQuestion}
-                    disabled={currentQuestionIndex === totalQuestions - 1}
-                    className="inline-flex items-center justify-center rounded-2xl bg-slate-900 px-5 py-3 font-semibold text-white shadow-md transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Siguiente pregunta →
-                  </button>
+                  {isLastQuestion ? (
+                    <button
+                      type="button"
+                      onClick={handleFinishExam}
+                      className="inline-flex items-center justify-center rounded-2xl bg-emerald-600 px-5 py-3 font-semibold text-white shadow-md transition hover:bg-emerald-700"
+                    >
+                      Finalizar simulador
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleNextQuestion}
+                      className="inline-flex items-center justify-center rounded-2xl bg-slate-900 px-5 py-3 font-semibold text-white shadow-md transition hover:bg-slate-800"
+                    >
+                      Siguiente pregunta →
+                    </button>
+                  )}
                 </div>
               </div>
             </section>
           </main>
 
-          {/* Right column */}
           <aside className="space-y-6">
-            {/* Summary card */}
-            <section className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
-              <h4 className="text-lg font-bold text-slate-900">
+            <section className="rounded-[30px] bg-white p-5 shadow-sm ring-1 ring-slate-200">
+              <h4 className="text-xl font-black text-slate-950">
                 Resumen del simulador
               </h4>
               <p className="mt-1 text-sm text-slate-500">
@@ -366,7 +949,7 @@ export default function ExamSimulatorLayout() {
                   <p className="text-xs uppercase tracking-wide text-slate-500">
                     Total
                   </p>
-                  <p className="mt-1 text-2xl font-bold text-slate-900">
+                  <p className="mt-1 text-3xl font-black text-slate-900">
                     {totalQuestions}
                   </p>
                 </div>
@@ -375,7 +958,7 @@ export default function ExamSimulatorLayout() {
                   <p className="text-xs uppercase tracking-wide text-blue-600">
                     Actual
                   </p>
-                  <p className="mt-1 text-2xl font-bold text-blue-800">
+                  <p className="mt-1 text-3xl font-black text-blue-800">
                     {currentQuestionIndex + 1}
                   </p>
                 </div>
@@ -384,7 +967,7 @@ export default function ExamSimulatorLayout() {
                   <p className="text-xs uppercase tracking-wide text-emerald-600">
                     Respondidas
                   </p>
-                  <p className="mt-1 text-2xl font-bold text-emerald-700">
+                  <p className="mt-1 text-3xl font-black text-emerald-700">
                     {answeredCount}
                   </p>
                 </div>
@@ -393,45 +976,46 @@ export default function ExamSimulatorLayout() {
                   <p className="text-xs uppercase tracking-wide text-rose-600">
                     Pendientes
                   </p>
-                  <p className="mt-1 text-2xl font-bold text-rose-700">
+                  <p className="mt-1 text-3xl font-black text-rose-700">
                     {unansweredCount}
                   </p>
                 </div>
               </div>
             </section>
 
-            {/* Question navigator */}
-            <section className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
-              <div className="mb-4 flex items-center justify-between">
-                <div>
-                  <h4 className="text-lg font-bold text-slate-900">
-                    Navegación
-                  </h4>
-                  <p className="text-sm text-slate-500">
-                    Salta entre reactivos.
-                  </p>
-                </div>
+            <section className="rounded-[30px] bg-white p-5 shadow-sm ring-1 ring-slate-200">
+              <div className="mb-4">
+                <h4 className="text-xl font-black text-slate-950">
+                  Navegación
+                </h4>
+                <p className="text-sm text-slate-500">
+                  Salta entre reactivos.
+                </p>
               </div>
 
               <div className="grid grid-cols-5 gap-3">
-                {MOCK_QUESTIONS.map((question, index) => {
+                {EXAM_QUESTIONS.map((question, index) => {
                   const isCurrent = index === currentQuestionIndex;
                   const isAnswered = Boolean(selectedAnswers[question.id]);
+                  const isMarked = markedForReview.includes(question.id);
 
                   return (
                     <button
                       key={question.id}
                       type="button"
                       onClick={() => handleGoToQuestion(index)}
-                      className={`flex h-12 w-full items-center justify-center rounded-xl text-sm font-bold transition ${
+                      className={`relative flex h-12 w-full items-center justify-center rounded-xl text-sm font-bold transition ${
                         isCurrent
-                          ? "bg-slate-900 text-white shadow-lg"
+                          ? "bg-slate-950 text-white shadow-lg"
                           : isAnswered
                           ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
                           : "bg-slate-100 text-slate-700 hover:bg-slate-200"
                       }`}
                     >
                       {question.id}
+                      {isMarked && (
+                        <span className="absolute -right-1 -top-1 h-3 w-3 rounded-full bg-amber-400 ring-2 ring-white" />
+                      )}
                     </button>
                   );
                 })}
@@ -439,7 +1023,7 @@ export default function ExamSimulatorLayout() {
 
               <div className="mt-5 space-y-2 text-sm text-slate-600">
                 <div className="flex items-center gap-2">
-                  <span className="h-3 w-3 rounded-full bg-slate-900" />
+                  <span className="h-3 w-3 rounded-full bg-slate-950" />
                   <span>Pregunta actual</span>
                 </div>
                 <div className="flex items-center gap-2">
@@ -450,18 +1034,23 @@ export default function ExamSimulatorLayout() {
                   <span className="h-3 w-3 rounded-full bg-slate-300" />
                   <span>Pendiente</span>
                 </div>
+                <div className="flex items-center gap-2">
+                  <span className="h-3 w-3 rounded-full bg-amber-400" />
+                  <span>Marcada para revisar</span>
+                </div>
               </div>
             </section>
 
-            {/* Actions */}
-            <section className="rounded-3xl bg-gradient-to-br from-slate-900 to-indigo-900 p-5 text-white shadow-xl">
-              <h4 className="text-lg font-bold">¿Listo para enviar?</h4>
-              <p className="mt-2 text-sm text-slate-300">
-                Revisa tus respuestas antes de finalizar el simulador.
+            <section className="rounded-[30px] bg-gradient-to-br from-slate-900 to-indigo-900 p-5 text-white shadow-2xl">
+              <h4 className="text-xl font-black">¿Listo para enviar?</h4>
+              <p className="mt-2 text-sm leading-7 text-slate-300">
+                Puedes finalizar en cualquier momento. El resultado mostrará tus
+                aciertos, errores, tiempo y análisis por materia.
               </p>
 
               <button
                 type="button"
+                onClick={handleFinishExam}
                 className="mt-5 w-full rounded-2xl bg-white px-5 py-3 font-bold text-slate-900 transition hover:bg-slate-100"
               >
                 Finalizar simulador
@@ -469,9 +1058,10 @@ export default function ExamSimulatorLayout() {
 
               <button
                 type="button"
+                onClick={handleRestartExam}
                 className="mt-3 w-full rounded-2xl border border-white/20 bg-white/10 px-5 py-3 font-semibold text-white transition hover:bg-white/20"
               >
-                Guardar progreso
+                Reiniciar intento
               </button>
             </section>
           </aside>
